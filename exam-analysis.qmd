@@ -1,0 +1,116 @@
+---
+title: "`r stringr::str_to_title(stringr::str_replace(params$exam, '_0?', ' '))` Question Analysis - Spring 2026"
+author: "RW"
+params:
+  exam: "exam_01"
+  chapter_subtitle: "Chapters 1-3 & 15/16"
+execute:
+  warning: false
+  message: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 4
+    toc-expand: true
+    code-fold: true
+    code-summary: "Show code"
+    code-copy: true
+embed-resources: true
+editor: source
+---
+
+<!--
+Render one report per exam:
+quarto render exam-analysis.qmd -P exam:exam_01 -o exam-01.html
+quarto render exam-analysis.qmd -P exam:exam_02 -o exam-02.html
+quarto render exam-analysis.qmd -P exam:exam_03 -o exam-03.html
+-->
+
+# Packages
+
+```{r}
+library(tidyverse)
+library(here)
+source(here("R", "item-analysis.R"))
+```
+
+# Data
+
+```{r}
+long <- read_exam(params$exam)
+
+long |>
+  distinct(instructor, section_id, id) |>
+  count(instructor, section_id, name = "students")
+```
+
+# Questions to Remove
+
+Items where more than one answer was scored correct (regraded or credit given) and items some students saw twice.
+
+```{r}
+bad_items <- flag_bad_items(long)
+bad_items |> count(exam, name = "n_removed")
+
+clean <- long |>
+  anti_join(bad_items, by = c("exam", "question_title"))
+```
+
+# Analysis
+
+```{r}
+results <- item_summary(clean)
+
+chapter <- read_csv(here("data", "fall_spring_exams_1_3_chapters.csv"))
+
+df <- results$items |>
+  left_join(chapter, by = "question_title")
+```
+
+# Selecting Questions
+
+## Keep questions with a discrimination index greater than or equal to 0.25
+
+From Canvas: Lower discrimination scores are scored +0.24 or lower; good scores are +0.25 or higher.
+
+```{r}
+select_di <- df |>
+  filter(discrimination_index >= 0.25) |>
+  filter(if_all(starts_with("point_biserial_distractor_"), \(x) x < 0))
+
+nrow(select_di)
+```
+
+## Comparison of Difficulty
+
+```{r}
+y_max <- ggplot_build(
+  ggplot(df, aes(difficulty_index)) + geom_histogram(bins = 30)
+)$data[[1]]$count |>
+  max()
+
+plot_difficulty(df, "All retained items", y_max)
+plot_difficulty(select_di, "Items with discrimination index ≥ 0.25", y_max)
+```
+
+# Distribution of Chapters that Questions Come from
+
+```{r}
+plot_chapters(df, params$chapter_subtitle)
+plot_chapters(select_di, params$chapter_subtitle)
+```
+
+# Combined DF
+
+```{r}
+df_questions <- results$options |>
+  left_join(df, by = c("exam", "question_title")) |>
+  select(-starts_with("point_biserial_correct"), -starts_with("point_biserial_distractor_"))
+
+write_excel_csv(
+  df_questions,
+  here("data", "spring", paste0(params$exam, "_combined.csv")),
+  na = ""
+)
+```

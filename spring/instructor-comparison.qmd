@@ -1,0 +1,296 @@
+---
+title: "Item Functioning Across Instructors - Spring 2026"
+author: "RW"
+execute:
+  warning: false
+  message: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 4
+    toc-expand: true
+    code-fold: true
+    code-summary: "Show code"
+    code-copy: true
+embed-resources: true
+editor: source
+---
+
+# Packages
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(easystats)
+source("R/item-analysis.R")
+```
+
+# Data
+
+```{r}
+long <- c("exam_01", "exam_02", "exam_03") |>
+  map(read_exam) |>
+  list_rbind()
+
+bad_items <- flag_bad_items(long)
+bad_items |> count(exam, name = "n_removed")
+
+clean <- long |>
+  anti_join(bad_items, by = c("exam", "question_title"))
+
+clean <- clean |>
+  filter(
+    !(exam == "exam_03" &
+      str_detect(question_title, "^For the last four questions"))
+  )
+```
+
+# Descriptive Comparison
+
+Difficulty for each item within each instructor, compared to the pooled difficulty. Points far from the diagonal are items that ran harder or easier for one instructor's students. Item-level samples are small (roughly 6 to 80 students per instructor), so single points are noisy.
+
+```{r}
+pooled <- item_summary(clean)$items |>
+  select(exam, question_title, pooled_difficulty = difficulty_index)
+
+by_instructor <- item_summary(clean, by = "instructor")$items |>
+  left_join(pooled, by = c("exam", "question_title"))
+
+ggplot(
+  by_instructor,
+  aes(x = pooled_difficulty, y = difficulty_index, size = answered_student_count)
+) +
+  geom_abline(linetype = "dashed", color = "grey50") +
+  geom_point(alpha = 0.4, color = "#4C72B0") +
+  facet_wrap(~instructor) +
+  scale_size_area(max_size = 3) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(
+    title = "Item Difficulty by Instructor vs. Pooled",
+    x = "Pooled difficulty",
+    y = "Instructor difficulty",
+    size = "Students"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
+```
+
+## What is the variance in difficulty for each question for each instructior 
+The distance of each point from the line is `difficulty_index - pooled_difficulty`, so a histogram of this difference per instructor shows the variance directly. 
+
+```{r}
+by_instructor <- by_instructor |>
+  mutate(diff_from_pooled = difficulty_index - pooled_difficulty)
+
+spread_summary <- by_instructor |>
+  summarise(
+    n_items = n(),
+    median_students = median(answered_student_count),
+    mean_diff = mean(diff_from_pooled, na.rm = TRUE),
+    sd_diff = sd(diff_from_pooled, na.rm = TRUE),
+    sampling_sd = sqrt(mean(variance / answered_student_count, na.rm = TRUE)),
+    .by = instructor
+  )
+
+ggplot(by_instructor, aes(x = diff_from_pooled)) +
+  geom_histogram(binwidth = 0.05, fill = "#4C72B0", color = "white", alpha = 0.9) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  facet_wrap(~instructor, ncol = 1) +
+  labs(
+    title = "Instructor Difficulty Minus Pooled Difficulty",
+    x = "Difference (positive = easier for this instructor's students)",
+    y = "Items"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
+```
+
+# Multilevel Model
+
+Students saw different random subsets of items, so total score is not a comparable ability measure across students. The model estimates ability from whatever items each student answered (student random effect), item difficulty (item random effect), and how much each item's difficulty shifts by instructor (item × instructor random effect). Instructor is a fixed effect because there are only four.
+
+```{r}
+model_data <- clean |>
+  filter(answered) |>
+  mutate(
+    item = paste(exam, question_title, sep = " | "),
+    across(c(id, section_id, item, instructor, exam), as.factor)
+  )
+
+m0 <- glmer(
+  correct ~ exam + instructor + 
+    (1 | id) + 
+    # (1 | section_id) + 
+    (1 | item),
+  data = model_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+m1 <- update(m0, . ~ . + (1 | item:instructor))
+```
+
+## Does item difficulty depend on instructor?
+
+The variance is tested at its boundary (zero), so the reported p-value is conservative. Halving it gives the usual correction.
+
+```{r}
+test_likelihoodratio(m0, m1)
+```
+
+```{r}
+model_parameters(m1, effects = "random")
+icc(m1, by_group = TRUE)
+```
+
+## Instructor differences in overall performance
+
+```{r}
+model_parameters(m1, effects = "fixed", exponentiate = TRUE)
+```
+
+## Items flagged for instructor-specific difficulty
+
+Item × instructor deviations whose 95% interval excludes zero. Positive values mean the item was easier for that instructor's students than expected.
+
+```{r}
+item_flags <- estimate_grouplevel(m1) |>
+  as_tibble() |>
+  filter(Group == "item:instructor") |>
+  mutate(
+    instructor = str_extract(Level, "[^:]+$"),
+    item = str_remove(Level, ":[^:]+$")
+  ) |>
+  separate_wider_delim(item, delim = " | ", names = c("exam", "question_title"), too_many = "merge") |>
+  filter(CI_low > 0 | CI_high < 0) |>
+  select(exam, question_title, instructor, Coefficient, CI_low, CI_high) |>
+  arrange(exam, question_title)
+
+item_flags |> select(-question_title)
+```
+
+```{r}
+item_instructor <- estimate_grouplevel(m1) |>
+  as_tibble() |>
+  filter(Group == "item:instructor") |>
+  mutate(
+    instructor = str_extract(Level, "[^:]+$"),
+    rank = rank(Coefficient, ties.method = "first"),
+    .by = NULL
+  ) |>
+  mutate(rank = rank(Coefficient, ties.method = "first"), .by = instructor)
+
+ggplot(item_instructor, aes(x = rank, y = Coefficient)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_linerange(
+    aes(ymin = CI_low, ymax = CI_high),
+    color = "grey70",
+    linewidth = 0.3
+  ) +
+  geom_point(color = "#4C72B0", size = 0.8) +
+  facet_wrap(~instructor) +
+  labs(
+    title = "Item × Instructor Deviations in Difficulty",
+    subtitle = "Each point is one item for one instructor, with 95% interval",
+    x = "Items (ranked within instructor)",
+    y = "Deviation (logit; positive = easier)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_blank()
+  )
+```
+
+# Assumption testing
+
+```{r}
+# Fitting
+check_convergence(m1)
+check_singularity(m1)
+
+# Fixed effects
+check_collinearity(m1)
+
+# Random effects
+check_normality(m1, effects = "random")
+plot(check_normality(m1, effects = "random"))
+
+# Fit of predicted vs. observed probabilities
+binned_residuals(m1)
+plot(binned_residuals(m1))
+
+```
+
+```{r}
+# Did glmer report convergence problems when fitting?
+m1@optinfo$conv$lme4
+m1@optinfo$warnings
+
+# Which item is the outlier at about -5?
+estimate_grouplevel(m1) |>
+  as_tibble() |>
+  filter(Group == "item") |>
+  arrange(Coefficient) |>
+  slice_head(n = 5) |>
+  separate_wider_delim(
+    Level,
+    delim = " | ",
+    names = c("exam", "question_title"),
+    too_many = "merge"
+  ) |>
+  left_join(
+    item_summary(clean)$items |>
+      select(exam, question_title, answered_student_count, difficulty_index),
+    by = c("exam", "question_title")
+  ) |>
+  select(exam, Coefficient, answered_student_count, difficulty_index)
+
+hardest_items <- estimate_grouplevel(m1) |>
+  as_tibble() |>
+  filter(Group == "item") |>
+  arrange(Coefficient) |>
+  slice_head(n = 5) |>
+  separate_wider_delim(
+    Level,
+    delim = " | ",
+    names = c("exam", "question_title"),
+    too_many = "merge"
+  ) |>
+  left_join(
+    item_summary(clean)$items |>
+      select(exam, question_title, answered_student_count, difficulty_index),
+    by = c("exam", "question_title")
+  ) |>
+  select(exam, Coefficient, answered_student_count, difficulty_index)
+
+hardest_items
+```
+
+```{r}
+resid_band <- model_data |>
+  mutate(fitted = fitted(m1), resid = correct - fitted) |>
+  filter(fitted >= 0.30, fitted <= 0.60)
+
+# By item
+resid_band |>
+  summarise(n = n(), mean_resid = mean(resid), .by = item) |>
+  arrange(mean_resid) |>
+  slice_head(n = 10) |>
+  select(-item)
+
+# By exam and instructor
+resid_band |>
+  summarise(n = n(), mean_resid = mean(resid), .by = c(exam, instructor)) |>
+  arrange(mean_resid)
+```
+
+```{r}
+sim <- simulate_residuals(m1)
+check_residuals(sim)
+plot(sim)
+DHARMa::testQuantiles(sim)
+```
+

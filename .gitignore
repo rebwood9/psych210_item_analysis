@@ -1,0 +1,16 @@
+/.quarto/
+*_files/
+.Rproj.user/
+.Rhistory
+.RData
+.Renviron
+
+# Data — kept local
+/data/
+*.csv
+*.xlsx
+*.parquet
+*.rds
+
+**/*.quarto_ipynb
+.DS_Store

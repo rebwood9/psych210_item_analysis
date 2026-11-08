@@ -1,0 +1,322 @@
+---
+title: "Exam 3 Question Analysis - Fall 2025"
+author: "RW"
+execute: 
+  warning: false
+  message: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 4
+    toc-expand: true
+    code-fold: true
+    code-summary: "Show code"
+    code-copy: true
+embed-resources: true
+editor: source
+---
+
+# Packages 
+```{r}
+library(tidyverse)
+library(here)
+```
+
+# Data 
+```{r}
+marshall <- read_csv(here("data", "fall", "exam_03", "marshall.csv"))
+okomeng <- read_csv(here("data", "fall", "exam_03", "okomeng.csv"))
+wood <- read_csv(here("data", "fall", "exam_03", "wood.csv"))
+baber <- read_csv(here("data", "fall", "exam_03", "baber.csv"))
+```
+
+# Reshape the Data & Loop Over all Dataframes 
+```{r}
+reshape_section <- function(df) {
+  df <- df |> 
+    group_by(id) |> 
+    slice_max(attempt, n = 1, with_ties = FALSE) |> 
+    ungroup()
+  
+  all_names <- names(df)
+  q_positions <- which(str_detect(all_names, "^\\d+:"))
+  pts_positions <- q_positions + 1
+
+  pairs <- tibble(
+    question_raw = all_names[q_positions],
+    points_col = all_names[pts_positions],
+    question_id  = str_extract(question_raw, "^\\d+")
+  )
+
+  pairs |>
+    pmap_dfr(function(question_raw, points_col, question_id) {
+      df |>
+        mutate(
+          question_id = question_id,
+          question_title = str_remove(question_raw, "^\\d+:\\s*"),
+          selection = as.character(.data[[question_raw]]),
+          points = as.numeric(.data[[points_col]]), 
+          answered = !is.na(selection) | !is.na(points),
+          correct = if_else(!is.na(points) & points == 1.0, 1L, 0L)
+        ) |> 
+        select(id, section_id, submitted, attempt, question_id,
+               question_title, selection, points, answered, correct, score)
+    }) 
+}
+
+# loop reshape function over all dfs
+sections <- list(
+  marshall = marshall,
+  okomeng = okomeng,
+  wood = wood,
+  baber = baber
+)
+
+long <- imap_dfr(
+  sections, ~ reshape_section(.x) |> 
+    mutate(section = .y)
+  )
+```
+
+# Analysis 
+```{r}
+## Item Statistics ----
+long <- long |> 
+  select(-question_id) |> 
+  mutate(
+    tier = case_when(
+      score >= quantile(score, 2/3, na.rm = TRUE) ~ "top",
+      score >= quantile(score, 1/3, na.rm = TRUE) ~ "middle",
+      TRUE ~ "bottom"
+    )
+  )
+
+item_stats <- long |>
+  filter(answered) |>
+  group_by(question_title) |>
+  summarise(
+    answered_student_count = n(),
+    top_student_count = sum(tier == "top"),
+    middle_student_count = sum(tier == "middle"),
+    bottom_student_count = sum(tier == "bottom"),
+    correct_student_count = sum(correct),
+    wrong_student_count = answered_student_count - correct_student_count,
+    correct_student_ratio = correct_student_count / answered_student_count,
+    wrong_student_ratio = wrong_student_count / answered_student_count,
+    correct_top_count = sum(correct == 1 & tier == "top"),
+    correct_middle_count = sum(correct == 1 & tier == "middle"),
+    correct_bottom_count = sum(correct == 1 & tier == "bottom"),
+    difficulty_index = correct_student_ratio,
+    variance = difficulty_index * (1 - difficulty_index),
+    standard_deviation = sqrt(variance),
+    .groups = "drop"
+  )
+
+## Discrimination Statistics ----
+### Point-biserial ---- 
+options_per_q <- long |>
+  filter(answered, !is.na(selection)) |>
+  distinct(question_title, option = selection)
+
+# every student crossed with every option their item offered
+option_pbis <- long |>
+  filter(answered, !is.na(selection)) |>
+  select(question_title, id, score, selection, correct) |>
+  left_join(options_per_q, by = "question_title",
+            relationship = "many-to-many") |>
+  mutate(chose_option = if_else(selection == option, 1L, 0L)) |>
+  group_by(question_title, option) |>
+  summarise(
+    point_biserial = cor(chose_option, score, use = "complete.obs"),
+    n_chose = sum(chose_option),
+    is_correct_option = any(correct == 1L & chose_option == 1L),
+    .groups = "drop"
+  )
+
+bad_titles <- option_pbis |>
+  filter(is_correct_option) |>
+  summarise(n = n(), .by = question_title) |>
+  filter(n > 1) |>
+  pull(question_title)
+
+option_pbis <- option_pbis |> 
+  filter(!question_title %in% bad_titles)
+
+pbis_wide <- option_pbis |>
+  group_by(question_title) |>
+  arrange(desc(is_correct_option), .by_group = TRUE) |> 
+  mutate(
+    distractor_num = cumsum(!is_correct_option),
+    label = if_else(is_correct_option,
+                    "point_biserial_correct",
+                    paste0("point_biserial_distractor_", distractor_num)
+  )) |>
+  ungroup() |>
+  select(question_title, label, point_biserial) |>
+  pivot_wider(names_from = label, values_from = point_biserial)
+
+### Discrimination Index ---- 
+disc_index <- long |>
+  filter(answered, tier %in% c("top", "bottom")) |>
+  group_by(question_title, tier) |>
+  summarise(p_correct = mean(correct), .groups = "drop") |>
+  pivot_wider(names_from = tier, values_from = p_correct) |>
+  mutate(discrimination_index = top - bottom) |> 
+  filter(!question_title %in% bad_titles)
+
+### Final DF ----
+df <- item_stats |>
+  left_join(select(disc_index, question_title, discrimination_index),
+            by = "question_title") |> 
+  left_join(pbis_wide, by = "question_title")
+
+# Save ----
+readr::write_excel_csv(
+  df, 
+  here("data", "fall" , "exam_03_combined.csv"),
+  na = ""
+)
+```
+
+# Add Chapter Information
+
+```{r}
+chapter <- read_csv(here("data", "fall_spring_exams_1_3_chapters.csv"))
+
+df <- df |> 
+  left_join(chapter, by = "question_title")
+```
+
+# Selecting Questions 
+
+## Questions to remove 
+```{r}
+#| output: false
+
+
+print(bad_titles)
+```
+
+## Keep questions with a discrimination index greater than or equal to 0.25
+
+From Canvas: Lower discrimination scores are scored +0.24 or lower; good scores are +0.25 or higher. 
+
+```{r}
+#| output: false
+
+
+select_di <- df |> 
+  filter(discrimination_index >= 0.25) |> 
+  filter(if_all(c(point_biserial_distractor_1, point_biserial_distractor_2, point_biserial_distractor_3), ~ .x < 0))
+
+select_di |> pull(question_title) |> print()
+```
+
+## Comparison of Difficulty 
+```{r}
+p <- ggplot(df, aes(x = difficulty_index)) +
+  geom_histogram(bins = 30, fill = "#4C72B0", color = "white", alpha = 0.9) +
+  scale_x_continuous(limits = c(0, 1))
+
+mu  <- mean(df$difficulty_index, na.rm = TRUE)
+sdv <- sd(df$difficulty_index, na.rm = TRUE)
+y_max <- max(ggplot_build(p)$data[[1]]$count)
+
+ggplot(df, aes(x = difficulty_index)) +
+  geom_histogram(bins = 30, fill = "#4C72B0", color = "white", alpha = 0.9) +
+  geom_vline(aes(xintercept = mean(difficulty_index, na.rm = TRUE)),
+             color = "#C44E52", linetype = "dashed", linewidth = 0.8) +
+  geom_vline(aes(xintercept = mu + sdv),
+             color = "grey30", linetype = "dashed", linewidth = 0.8) +
+  geom_vline(aes(xintercept = mu - sdv),
+             color = "grey30", linetype = "dashed", linewidth = 0.8) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  coord_cartesian(ylim = c(0, y_max)) +
+  labs(
+    title = "Distribution of Difficulty Index",
+    subtitle = paste0(
+      "Frequency of revised items across the difficulty scale\n",
+      "Mean = ", round(mu, 2),
+      "   \u00B1 1 SD = [", round(mu - sdv, 2), ", ", round(mu + sdv, 2), "]"
+    ),
+    x = "Difficulty Index",
+    y = "Count",
+    caption = paste0("N = ", sum(!is.na(df$difficulty_index)))
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey40"),
+    panel.grid.minor = element_blank()
+  )
+
+mu_di  <- mean(select_di$difficulty_index, na.rm = TRUE)
+sdv_di <- sd(select_di$difficulty_index, na.rm = TRUE)
+
+ggplot(select_di, aes(x = difficulty_index)) +
+  geom_histogram(bins = 30, fill = "#4C72B0", color = "white", alpha = 0.9) +
+  geom_vline(aes(xintercept = mu_di),
+             color = "#C44E52", linetype = "dashed", linewidth = 0.8) +
+  geom_vline(aes(xintercept = mu_di + sdv_di),
+             color = "grey30", linetype = "dashed", linewidth = 0.8) +
+  geom_vline(aes(xintercept = mu_di - sdv_di),
+             color = "grey30", linetype = "dashed", linewidth = 0.8) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  coord_cartesian(ylim = c(0, y_max)) +
+  labs(
+    title = "Distribution of Difficulty Index",
+    subtitle = paste0(
+      "Frequency of revised items across the difficulty scale\n",
+      "Mean = ", round(mu, 2),
+      "   \u00B1 1 SD = [", round(mu - sdv, 2), ", ", round(mu + sdv, 2), "]"
+    ),
+    x = "Difficulty Index",
+    y = "Count",
+    caption = paste0("N = ", sum(!is.na(df$difficulty_index)))
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey40"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+# Distribution of Chapters that Questions Come from
+
+```{r}
+ggplot(df, aes(x = factor(chapter), y = after_stat(count / sum(count)))) +
+  geom_bar(fill = "#4C72B0", color = "white", alpha = 0.9) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Distribution of Questions by Chapter",
+    subtitle = "Chapters 1-3 & 15/16",
+    x = "Chapter",
+    y = "Proportion of Questions",
+    caption = paste0("N = ", sum(!is.na(df$chapter)))
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey40"),
+    panel.grid.minor = element_blank()
+  )
+
+ggplot(select_di, aes(x = factor(chapter), y = after_stat(count / sum(count)))) +
+  geom_bar(fill = "#4C72B0", color = "white", alpha = 0.9) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Distribution of Questions by Chapter",
+    subtitle = "Chapters 1-3 & 15/16",
+    x = "Chapter",
+    y = "Proportion of Questions",
+    caption = paste0("N = ", sum(!is.na(select_di$chapter)))
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey40"),
+    panel.grid.minor = element_blank()
+  )
+```

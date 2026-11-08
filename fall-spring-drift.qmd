@@ -1,0 +1,78 @@
+---
+title: "Exam 2 Question Analysis - Fall 2025"
+author: "RW"
+execute: 
+  warning: false
+  message: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 4
+    toc-expand: true
+    code-fold: true
+    code-summary: "Show code"
+    code-copy: true
+embed-resources: true
+editor: source
+---
+
+# Packages 
+```{r}
+library(tidyverse)
+library(here)
+```
+
+# Data 
+```{r}
+exam <- c("exam_01", "exam_02", "exam_03")
+
+fall_exams <- exam |> 
+  set_names() |> 
+  map(\(exam) read_csv(here("data", "fall", paste0(exam,"_combined.csv")))) |> 
+  list_rbind(names_to = "exam")
+
+spring_exams <- exam |> 
+  set_names() |> 
+  map(\(exam) read_csv(here("data", "spring", paste0(exam,"_combined.csv")))) |> 
+  list_rbind(names_to = "exam")
+
+all_exams <- list(fall = fall_exams, spring = spring_exams) |> 
+  list_rbind(names_to = "semester")
+
+# # Save ----
+# readr::write_excel_csv(
+#   all_exams, 
+#   here("data", "fall_spring_exams_1_3.csv"),
+#   na = ""
+# )
+```
+
+# Comparison 
+
+Compare how the difficulty and discrimination on exams changed 
+
+```{r}
+exam_diffs <- all_exams |> 
+  select(semester, exam, question_title, difficulty_index, discrimination_index) |> 
+  pivot_wider(
+    names_from = semester,
+    values_from = c(difficulty_index, discrimination_index)
+  ) |> 
+  filter(!is.na(difficulty_index_fall), !is.na(difficulty_index_spring)) |> 
+  mutate(
+    difficulty_diff = difficulty_index_spring - difficulty_index_fall,
+    discrimination_diff = discrimination_index_spring - discrimination_index_fall
+  )
+
+exam_summary <- exam_diffs |> 
+  group_by(exam) |> 
+  summarize(
+    n_items = n(),
+    mean_difficulty_diff = mean(difficulty_diff, na.rm = TRUE),
+    sd_difficulty_diff = sd(difficulty_diff, na.rm = TRUE),
+    mean_discrimination_diff = mean(discrimination_diff, na.rm = TRUE),
+    sd_discrimination_diff = sd(discrimination_diff, na.rm = TRUE)
+  )
+```
+

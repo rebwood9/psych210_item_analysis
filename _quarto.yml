@@ -1,0 +1,42 @@
+project:
+  type: website
+  output-dir: docs
+
+website:
+  title: "PSYC 210 Item Analysis"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - text: "Fall"
+        menu:
+          - href: fall/exam-01.qmd
+            text: "Exam 1"
+          - href: fall/exam-02.qmd
+            text: "Exam 2"
+          - href: fall/exam-03.qmd
+            text: "Exam 3"
+          - href: fall/exam-04.qmd
+            text: "Exam 4"
+          - href: fall/exam-04-sm.qmd
+            text: "Exam 4 SM"
+      - text: "Spring"
+        menu:
+          - href: spring/exam-01.qmd
+            text: "Exam 1"
+          - href: spring/exam-02.qmd
+            text: "Exam 2"
+          - href: spring/exam-03.qmd
+            text: "Exam 3"
+          - href: spring/instructor-comparison.qmd
+            text: "Instructor Comparison"
+      - text: "Across Semesters"
+        menu: 
+          - href: drift-comparison.qmd
+            text: "Fall vs. Spring Drift"
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    code-fold: true

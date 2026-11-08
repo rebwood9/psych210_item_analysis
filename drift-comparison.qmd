@@ -1,0 +1,262 @@
+---
+title: "Item Drift Between Semesters - Fall 2025 vs. Spring 2026"
+author: "RW"
+execute:
+  warning: false
+  message: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 4
+    toc-expand: true
+    code-fold: true
+    code-summary: "Show code"
+    code-copy: true
+embed-resources: true
+editor: source
+---
+
+# Packages
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(easystats)
+source("R/item-analysis.R")
+```
+
+# Data
+
+Both semesters are built from the raw instructor files so they get the same cleaning.
+
+```{r}
+#| output: false
+
+
+exams <- c("exam_01", "exam_02", "exam_03")
+
+long <- c("fall", "spring") |>
+  set_names() |>
+  map(\(term) exams |> map(\(e) read_exam(e, term = term)) |> list_rbind()) |>
+  list_rbind(names_to = "semester")
+```
+
+## Bad items
+
+Flagged within each semester, then dropped from both so the comparison uses the same items.
+
+```{r}
+bad_items <- long |>
+  split(~semester) |>
+  map(flag_bad_items) |>
+  list_rbind(names_to = "semester")
+
+bad_items |> count(semester, exam, name = "n_removed")
+
+clean <- long |>
+  anti_join(bad_items, by = c("exam", "question_title")) |>
+  filter(
+    !(exam == "exam_03" &
+      str_detect(question_title, "^For the last four questions"))
+  )
+```
+
+## Items shared across semesters
+
+Drift can only be measured on items that appear in both semesters.
+
+```{r}
+shared_items <- clean |>
+  distinct(semester, exam, question_title) |>
+  count(exam, question_title) |>
+  filter(n == 2) |>
+  select(-n)
+
+clean_shared <- clean |>
+  semi_join(shared_items, by = c("exam", "question_title"))
+
+shared_items |> count(exam, name = "n_shared_items")
+```
+
+# Descriptive Comparison
+
+Difficulty and discrimination are computed within each semester (tiers are formed within exam × semester).
+
+```{r}
+drift_items <- item_summary(clean_shared, by = "semester")$items |>
+  select(exam, semester, question_title, difficulty_index, discrimination_index) |>
+  pivot_wider(
+    names_from = semester,
+    values_from = c(difficulty_index, discrimination_index)
+  ) |>
+  mutate(
+    difficulty_diff = difficulty_index_spring - difficulty_index_fall,
+    discrimination_diff = discrimination_index_spring - discrimination_index_fall
+  )
+
+drift_summary <- drift_items |>
+  summarise(
+    n_items = n(),
+    mean_difficulty_diff = mean(difficulty_diff, na.rm = TRUE),
+    sd_difficulty_diff = sd(difficulty_diff, na.rm = TRUE),
+    mean_discrimination_diff = mean(discrimination_diff, na.rm = TRUE),
+    sd_discrimination_diff = sd(discrimination_diff, na.rm = TRUE),
+    .by = exam
+  )
+
+drift_summary
+```
+
+## Difficulty
+
+Points above the line were easier in spring; points below were harder.
+
+```{r}
+ggplot(drift_items, aes(x = difficulty_index_fall, y = difficulty_index_spring)) +
+  geom_abline(linetype = "dashed", color = "grey50") +
+  geom_point(alpha = 0.5, color = "#4C72B0") +
+  facet_wrap(~exam) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(
+    title = "Item Difficulty: Fall vs. Spring",
+    caption = "Points above the line were easier in spring; points below were harder",
+    x = "Fall difficulty",
+    y = "Spring difficulty"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
+```
+
+## Discrimination
+
+```{r}
+ggplot(drift_items, aes(x = discrimination_index_fall, y = discrimination_index_spring)) +
+  geom_abline(linetype = "dashed", color = "grey50") +
+  geom_point(alpha = 0.5, color = "#4C72B0") +
+  facet_wrap(~exam) +
+  coord_equal() +
+  labs(
+    title = "Item Discrimination: Fall vs. Spring",
+    x = "Fall discrimination",
+    y = "Spring discrimination"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
+```
+
+# Multilevel Model
+
+Same structure as the instructor comparison, with semester in place of instructor for the item-level term. Students are keyed within semester. Instructor stays as a fixed effect because Baber taught only in fall and Wu only in spring; without it, those instructors' differences would be counted as semester differences.
+
+```{r}
+model_data <- clean_shared |>
+  filter(answered) |>
+  mutate(
+    student = paste(semester, id, sep = "_"),
+    item = paste(exam, question_title, sep = " | "),
+    across(c(student, item, instructor, exam, semester), as.factor)
+  )
+
+model_data <- model_data |>
+  mutate(instructor = fct_relevel(instructor, "marshall"))
+
+d0 <- glmer(
+  correct ~ exam * semester + instructor + (1 | student) + (1 | item),
+  data = model_data,
+  family = binomial,
+  control = glmerControl(optimizer = "bobyqa")
+)
+
+d1 <- update(d0, . ~ . + (1 | item:semester))
+```
+
+## Does item difficulty drift between semesters?
+
+The variance is tested at its boundary (zero), so halve the reported p-value.
+
+```{r}
+test_likelihoodratio(d0, d1)
+```
+
+```{r}
+model_parameters(d1, effects = "random")
+icc(d1, by_group = TRUE)
+```
+
+## Overall semester differences
+
+`semester [spring]` is the shift on Exam 1. The `exam × semester` terms show whether that shift differed on Exams 2 and 3.
+
+```{r}
+model_parameters(d1, effects = "fixed", exponentiate = TRUE)
+```
+
+## Assumption checks
+
+```{r}
+d1@optinfo$warnings
+check_singularity(d1)
+check_collinearity(d1)
+check_normality(d1, effects = "random")
+plot(check_normality(d1, effects = "random"))
+
+sim <- simulate_residuals(d1)
+check_residuals(sim)
+DHARMa::testQuantiles(sim)
+```
+
+```{r}
+clean_shared |>
+  filter(answered) |>
+  summarise(n = n(), p_correct = mean(correct), .by = c(semester, exam))
+
+clean_shared |>
+  filter(answered) |>
+  count(semester, points)
+
+long |>
+  distinct(semester, exam, instructor, id, attempt) |>
+  count(semester, attempt)
+
+fall_exams |>
+  summarise(mean_difficulty = mean(difficulty_index, na.rm = TRUE), .by = exam)
+```
+
+# Items with the biggest drift 
+
+```{r}
+item_drift <- estimate_grouplevel(d1) |>
+  as_tibble() |>
+  filter(Group == "item:semester") |>
+  mutate(
+    semester = str_extract(Level, "[^:]+$"),
+    item = str_remove(Level, ":[^:]+$")
+  ) |>
+  separate_wider_delim(
+    item,
+    delim = " | ",
+    names = c("exam", "question_title"),
+    too_many = "merge"
+  ) |>
+  select(exam, question_title, semester, Coefficient) |>
+  pivot_wider(
+    names_from = semester,
+    values_from = Coefficient,
+    names_prefix = "w_"
+  ) |>
+  mutate(drift = w_spring - w_fall) |>
+  left_join(
+    drift_items |>
+      select(exam, question_title, difficulty_index_fall, difficulty_index_spring, difficulty_diff),
+    by = c("exam", "question_title")
+  ) |>
+  arrange(drift)
+
+# Largest drops beyond the average shift
+item_drift |> slice_head(n = 10) |> select(-question_title)
+
+# Items that held up best
+item_drift |> slice_tail(n = 10) |> select(-question_title)
+```
+

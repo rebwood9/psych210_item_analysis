@@ -1,0 +1,25 @@
+---
+title: "PSYC 210 Item Analysis"
+---
+
+Item analyses for fall and spring exams. Use the navbar to browse by
+semester, or jump directly to a report below.
+
+## Fall
+
+- [Exam 1](fall/exam-01.qmd)
+- [Exam 2](fall/exam-02.qmd)
+- [Exam 3](fall/exam-03.qmd)
+- [Exam 4](fall/exam-04.qmd)
+- [Exam 4 SM](fall/exam-04-sm.qmd)
+
+## Spring
+
+- [Exam 1](spring/exam-01.qmd)
+- [Exam 2](spring/exam-02.qmd)
+- [Exam 3](spring/exam-03.qmd)
+- [Instructor Comparison](spring/instructor-comparison.qmd)
+
+## Across Semesters
+
+- [Fall vs. Spring Drift](drift-comparison.qmd)
