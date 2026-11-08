@@ -1,0 +1,37 @@
+[
+  {
+    "objectID": "spring/instructor-comparison.html",
+    "href": "spring/instructor-comparison.html",
+    "title": "Item Functioning Across Instructors - Spring 2026",
+    "section": "",
+    "text": "Show code\nlibrary(tidyverse)\nlibrary(lme4)\nlibrary(easystats)\nsource(here::here(\"R\", \"item-analysis.R\"))"
+  },
+  {
+    "objectID": "spring/instructor-comparison.html#what-is-the-variance-in-difficulty-for-each-question-for-each-instructior",
+    "href": "spring/instructor-comparison.html#what-is-the-variance-in-difficulty-for-each-question-for-each-instructior",
+    "title": "Item Functioning Across Instructors - Spring 2026",
+    "section": "What is the variance in difficulty for each question for each instructior",
+    "text": "What is the variance in difficulty for each question for each instructior\nThe distance of each point from the line is difficulty_index - pooled_difficulty, so a histogram of this difference per instructor shows the variance directly.\n\n\nShow code\nby_instructor &lt;- by_instructor |&gt;\n  mutate(diff_from_pooled = difficulty_index - pooled_difficulty)\n\nspread_summary &lt;- by_instructor |&gt;\n  summarise(\n    n_items = n(),\n    median_students = median(answered_student_count),\n    mean_diff = mean(diff_from_pooled, na.rm = TRUE),\n    sd_diff = sd(diff_from_pooled, na.rm = TRUE),\n    sampling_sd = sqrt(mean(variance / answered_student_count, na.rm = TRUE)),\n    .by = instructor\n  )\n\nggplot(by_instructor, aes(x = diff_from_pooled)) +\n  geom_histogram(binwidth = 0.05, fill = \"#4C72B0\", color = \"white\", alpha = 0.9) +\n  geom_vline(xintercept = 0, linetype = \"dashed\", color = \"grey50\") +\n  facet_wrap(~instructor, ncol = 1) +\n  labs(\n    title = \"Instructor Difficulty Minus Pooled Difficulty\",\n    x = \"Difference (positive = easier for this instructor's students)\",\n    y = \"Items\"\n  ) +\n  theme_minimal(base_size = 13) +\n  theme(plot.title = element_text(face = \"bold\"), panel.grid.minor = element_blank())"
+  },
+  {
+    "objectID": "spring/instructor-comparison.html#does-item-difficulty-depend-on-instructor",
+    "href": "spring/instructor-comparison.html#does-item-difficulty-depend-on-instructor",
+    "title": "Item Functioning Across Instructors - Spring 2026",
+    "section": "Does item difficulty depend on instructor?",
+    "text": "Does item difficulty depend on instructor?\nThe variance is tested at its boundary (zero), so the reported p-value is conservative. Halving it gives the usual correction.\n\n\nShow code\ntest_likelihoodratio(m0, m1)\n\n\n# Likelihood-Ratio-Test (LRT) for Model Comparison (ML-estimator)\n\nName |    Model | df | df_diff | Criterion | Chi2 |     p\n---------------------------------------------------------\nm0   | glmerMod |  8 |         |  24941.99 |      |      \nm1   | glmerMod |  9 |       1 |  24932.86 | 9.13 | 0.003\n\n\n\n\nShow code\nmodel_parameters(m1, effects = \"random\")\n\n\n# Random Effects\n\nParameter                       | Coefficient | 95% CI\n------------------------------------------------------\nSD (Intercept: item:instructor) |        0.20 |       \nSD (Intercept: id)              |        0.82 |       \nSD (Intercept: item)            |        0.93 |       \n\n\nShow code\nicc(m1, by_group = TRUE)\n\n\n# ICC by Group\n\nGroup           |   ICC\n-----------------------\nitem:instructor | 0.008\nid              | 0.137\nitem            | 0.178"
+  },
+  {
+    "objectID": "spring/instructor-comparison.html#instructor-differences-in-overall-performance",
+    "href": "spring/instructor-comparison.html#instructor-differences-in-overall-performance",
+    "title": "Item Functioning Across Instructors - Spring 2026",
+    "section": "Instructor differences in overall performance",
+    "text": "Instructor differences in overall performance\n\n\nShow code\nmodel_parameters(m1, effects = \"fixed\", exponentiate = TRUE)\n\n\n# Fixed Effects\n\nParameter            | Odds Ratio |   SE |       95% CI |     z |      p\n------------------------------------------------------------------------\n(Intercept)          |       3.77 | 0.58 | [2.79, 5.11] |  8.59 | &lt; .001\nexam [exam_02]       |       1.31 | 0.19 | [0.98, 1.75] |  1.82 | 0.068 \nexam [exam_03]       |       0.66 | 0.10 | [0.49, 0.88] | -2.80 | 0.005 \ninstructor [okomeng] |       1.06 | 0.17 | [0.78, 1.44] |  0.39 | 0.699 \ninstructor [wood]    |       1.20 | 0.19 | [0.88, 1.63] |  1.15 | 0.250 \ninstructor [wu]      |       0.88 | 0.14 | [0.65, 1.19] | -0.86 | 0.389"
+  },
+  {
+    "objectID": "spring/instructor-comparison.html#items-flagged-for-instructor-specific-difficulty",
+    "href": "spring/instructor-comparison.html#items-flagged-for-instructor-specific-difficulty",
+    "title": "Item Functioning Across Instructors - Spring 2026",
+    "section": "Items flagged for instructor-specific difficulty",
+    "text": "Items flagged for instructor-specific difficulty\nItem × instructor deviations whose 95% interval excludes zero. Positive values mean the item was easier for that instructor’s students than expected.\n\n\nShow code\nitem_flags &lt;- estimate_grouplevel(m1) |&gt;\n  as_tibble() |&gt;\n  filter(Group == \"item:instructor\") |&gt;\n  mutate(\n    instructor = str_extract(Level, \"[^:]+$\"),\n    item = str_remove(Level, \":[^:]+$\")\n  ) |&gt;\n  separate_wider_delim(item, delim = \" | \", names = c(\"exam\", \"question_title\"), too_many = \"merge\") |&gt;\n  filter(CI_low &gt; 0 | CI_high &lt; 0) |&gt;\n  select(exam, question_title, instructor, Coefficient, CI_low, CI_high) |&gt;\n  arrange(exam, question_title)\n\nitem_flags |&gt; select(-question_title)\n\n\n# A tibble: 0 × 5\n# ℹ 5 variables: exam &lt;chr&gt;, instructor &lt;chr&gt;, Coefficient &lt;dbl&gt;, CI_low &lt;dbl&gt;,\n#   CI_high &lt;dbl&gt;\n\n\n\n\nShow code\nitem_instructor &lt;- estimate_grouplevel(m1) |&gt;\n  as_tibble() |&gt;\n  filter(Group == \"item:instructor\") |&gt;\n  mutate(\n    instructor = str_extract(Level, \"[^:]+$\"),\n    rank = rank(Coefficient, ties.method = \"first\"),\n    .by = NULL\n  ) |&gt;\n  mutate(rank = rank(Coefficient, ties.method = \"first\"), .by = instructor)\n\nggplot(item_instructor, aes(x = rank, y = Coefficient)) +\n  geom_hline(yintercept = 0, linetype = \"dashed\", color = \"grey50\") +\n  geom_linerange(\n    aes(ymin = CI_low, ymax = CI_high),\n    color = \"grey70\",\n    linewidth = 0.3\n  ) +\n  geom_point(color = \"#4C72B0\", size = 0.8) +\n  facet_wrap(~instructor) +\n  labs(\n    title = \"Item × Instructor Deviations in Difficulty\",\n    subtitle = \"Each point is one item for one instructor, with 95% interval\",\n    x = \"Items (ranked within instructor)\",\n    y = \"Deviation (logit; positive = easier)\"\n  ) +\n  theme_minimal(base_size = 13) +\n  theme(\n    plot.title = element_text(face = \"bold\"),\n    panel.grid.minor = element_blank(),\n    axis.text.x = element_blank()\n  )"
+  }
+]

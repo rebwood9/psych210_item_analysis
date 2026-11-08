@@ -23,7 +23,7 @@ editor: source
 library(tidyverse)
 library(lme4)
 library(easystats)
-source("R/item-analysis.R")
+source(here::here("R", "item-analysis.R"))
 ```
 
 # Data

@@ -1,6 +1,11 @@
 project:
   type: website
   output-dir: docs
+  render:
+    - "*.qmd"
+    - "!R/"
+    - "!exam-analysis.qmd"
+    - "!fall-spring-drift.qmd"
 
 website:
   title: "PSYC 210 Item Analysis"

@@ -218,9 +218,6 @@ clean_shared |>
 long |>
   distinct(semester, exam, instructor, id, attempt) |>
   count(semester, attempt)
-
-fall_exams |>
-  summarise(mean_difficulty = mean(difficulty_index, na.rm = TRUE), .by = exam)
 ```
 
 # Items with the biggest drift 
