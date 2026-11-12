@@ -215,6 +215,33 @@ Post hoc contrasts compared spring with fall within each exam, averaged over ins
 
 **No instructor's students differed significantly from Marshall's. In fall, no exam differed significantly from Exam 1. Spring odds were significantly lower than fall odds on all three exams.**
 
+```{r}
+estimate_means(d1, by = c("exam", "semester")) |>
+  as_tibble() |>
+  ggplot(aes(x = exam, y = Probability, color = semester)) +
+  geom_pointrange(
+    aes(ymin = CI_low, ymax = CI_high),
+    position = position_dodge(width = 0.4)
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_color_manual(values = c("#4C72B0", "#C44E52")) +
+  labs(
+    title = "Predicted Probability of a Correct Answer by Exam and Semester",
+    subtitle = "Typical student and item, averaged over instructors; bars are 95% CIs",
+    x = "Exam",
+    y = "Probability correct",
+    color = "Semester"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey40"),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+```
+
+
 ## Assumption checks
 
 ```{r}
