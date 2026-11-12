@@ -139,15 +139,79 @@ The variance is tested at its boundary (zero), so the reported p-value is conser
 test_likelihoodratio(m0, m1)
 ```
 
+Adding a random intercept for item X instructor improved fit, $\chi^2(1) = 9.13, p = .001$.
+
 ```{r}
 model_parameters(m1, effects = "random")
 icc(m1, by_group = TRUE)
 ```
 
+Exam items differed in difficulty by a SD of 0.93 logits. For a typical Marshall student on a typical Exam 1 item, the odds of a correct answer are 3.77 ($\ln(3.77) = 1.33$), or a probability of .79. An item 1 SD easier than average has 2.53 times the odds of a correct answer ($\exp(0.93) = 2.53$), or $P = \frac{1}{1 + e^{-(1.33 + 0.93)}} = \frac{1}{1 + 0.104} = .906$ or 90.6%. An item 1 SD harder than average has 0.395 times the odds of a correct answer ($\exp(-0.93) = \frac{1}{e^{0.93}} = \frac{1}{2.53} = 0.395$), or $P = \frac{1}{1 + e^{-(1.33 - 0.93)}} = \frac{1}{1 + 0.670} = .599$ or 59.9%.
+
+Students differed in ability by a SD of 0.82 logits. Using the same baseline, a student 1 SD above the mean has 2.27 times the odds of a correct answer ($\exp(0.82) = 2.27$), or $P = \frac{1}{1 + e^{-(1.33 + 0.82)}} = \frac{1}{1 + 0.116} = .896$ or 89.6%. A student 1 SD below the mean has 0.44 times the odds of a correct answer ($\exp(-0.82) = \frac{1}{e^{0.82}} = \frac{1}{2.27} = 0.44$), or $P = \frac{1}{1 + e^{-(1.33 - 0.82)}} = \frac{1}{1 + 0.601} = .625$ or 62.5%.
+
+Item difficulty shifted for a given instructor's students by a SD of 0.20 logits. Using the same baseline, an item 1 SD easier for one instructor's students than its overall difficulty would predict has 1.22 times the odds of a correct answer ($\exp(0.20) = 1.22$), or $P = \frac{1}{1 + e^{-(1.33 + 0.20)}} = \frac{1}{1 + 0.217} = .822$ or 82.2%. An item 1 SD harder for one instructor's students has 0.819 times the odds of a correct answer ($\exp(-0.20) = \frac{1}{e^{0.20}} = \frac{1}{1.22} = 0.819$), or $P = \frac{1}{1 + e^{-(1.33 - 0.20)}} = \frac{1}{1 + 0.323} = .756$ or 75.6%.
+
+Exam item account for 17.8% of the variance in answering correctly, student differences account for 13.7%, and only 0.8% of the variance in answering correctly is due to instructor specific item shifts. 
+
 ## Instructor differences in overall performance
 
 ```{r}
 model_parameters(m1, effects = "fixed", exponentiate = TRUE)
+```
+
+Each instructor is compared with Marshall on the same exam, and each exam with Exam 1 for the same instructor. A typical Marshall student on a typical Exam 1 item has odds of 3.77 to 1 of answering correctly (*OR* = 3.77, *SE* = 0.58, 95% CI [2.79, 5.11]), a probability of .79. Exam 2 items had 31% higher odds of a correct answer than Exam 1 items (*OR* = 1.31, *SE* = 0.19, 95% CI [0.98, 1.75], *p* = .068), a probability of .83 for a typical Marshall student, though the interval includes 1. Exam 3 items had 34% lower odds of a correct answer than Exam 1 items (*OR* = 0.66, *SE* = 0.10, 95% CI [0.49, 0.88], *p* = .005), a probability of .71.
+
+Compared to Marshall's students on the same exam, Okomeng's students had 6% higher odds of answering correctly (*OR* = 1.06, *SE* = 0.17, 95% CI [0.78, 1.44], *p* = .699; probability .80 on Exam 1), Wood's students had 20% higher odds (*OR* = 1.20, *SE* = 0.19, 95% CI [0.88, 1.63], *p* = .250; probability .82), and Wu's students had 12% lower odds (*OR* = 0.88, *SE* = 0.14, 95% CI [0.65, 1.19], *p* = .389; probability .77). **No instructor's students differed significantly from Marshall's. Only Exam 3 differed significantly from Exam 1.**
+
+## Instructor Means 
+
+```{r}
+instr_means <- estimate_means(m1, by = "instructor")
+
+instr_means |>
+  as_tibble() |>
+  ggplot(aes(x = Probability, y = fct_reorder(instructor, Probability))) +
+  geom_pointrange(aes(xmin = CI_low, xmax = CI_high), color = "#4C72B0") +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Predicted Probability of a Correct Answer by Instructor",
+    subtitle = "Typical student and item, averaged over exams; bars are 95% CIs",
+    x = "Probability correct",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey40"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+```{r}
+estimate_relation(m1, by = c("instructor", "exam")) |>
+  as_tibble() |>
+  ggplot(aes(x = instructor, y = Predicted, color = exam)) +
+  geom_pointrange(
+    aes(ymin = CI_low, ymax = CI_high),
+    position = position_dodge(width = 0.4)
+  ) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_color_manual(values = c("#4C72B0", "#C44E52", "#55A868")) +
+  labs(
+    title = "Predicted Probability of a Correct Answer by Instructor and Exam",
+    subtitle = "Typical student and item; bars are 95% CIs",
+    x = "Instructor",
+    y = "Probability correct",
+    color = "Exam"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "grey40"),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
 ```
 
 ## Items flagged for instructor-specific difficulty
@@ -293,4 +357,5 @@ check_residuals(sim)
 plot(sim)
 DHARMa::testQuantiles(sim)
 ```
+
 
