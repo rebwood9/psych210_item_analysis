@@ -24,6 +24,7 @@ library(tidyverse)
 library(lme4)
 library(easystats)
 source("R/item-analysis.R")
+library(emmeans)
 ```
 
 # Data
@@ -32,7 +33,6 @@ Both semesters are built from the raw instructor files so they get the same clea
 
 ```{r}
 #| output: false
-
 
 exams <- c("exam_01", "exam_02", "exam_03")
 
@@ -110,8 +110,6 @@ drift_summary
 
 ## Difficulty
 
-Points above the line were easier in spring; points below were harder.
-
 ```{r}
 ggplot(drift_items, aes(x = difficulty_index_fall, y = difficulty_index_spring)) +
   geom_abline(linetype = "dashed", color = "grey50") +
@@ -144,6 +142,8 @@ ggplot(drift_items, aes(x = discrimination_index_fall, y = discrimination_index_
   theme_minimal(base_size = 13) +
   theme(plot.title = element_text(face = "bold"), panel.grid.minor = element_blank())
 ```
+
+Item discrimination is better in the spring compared to the fall across all three exams, indicated by the majority of points sitting above the line where the spring and fall discrimination are equal. 
 
 # Multilevel Model
 
@@ -179,10 +179,18 @@ The variance is tested at its boundary (zero), so halve the reported p-value.
 test_likelihoodratio(d0, d1)
 ```
 
+Allowing item difficulty to differ by semester improved fit substantially, $\chi^2(1) = 1076.5, p < .001$. Items shifted between semesters beyond the average exam by semester shift. 
+
 ```{r}
 model_parameters(d1, effects = "random")
 icc(d1, by_group = TRUE)
 ```
+
+Exam items differed in difficulty by a SD of 0.86 logits. This is the part of item difficulty that holds across both semesters. For a typical Marshall student on a typical Exam 1 item in spring, the odds of a correct answer are 3.97 ($18.06 \times 0.22 = 3.97$; $\ln(3.97) = 1.38$), or a probability of .80. An item 1 SD easier than average has 2.36 times the odds of a correct answer ($\exp(0.86) = 2.36$), or $P = \frac{1}{1 + e^{-(1.38 + 0.86)}} = \frac{1}{1 + 0.106} = .904$ or 90.4%. An item 1 SD harder than average has 0.42 times the odds of a correct answer ($\exp(-0.86) = \frac{1}{e^{0.86}} = \frac{1}{2.36} = 0.42$), or $P = \frac{1}{1 + e^{-(1.38 - 0.86)}} = \frac{1}{1 + 0.595} = .627$ or 62.7%.
+
+Item difficulty shifted within a given semester by a SD of 0.72 logits, beyond that exam's average fall-to-spring shift. Using the same baseline, an item 1 SD easier in one semester than its overall difficulty would predict has 2.05 times the odds of a correct answer ($\exp(0.72) = 2.05$), or $P = \frac{1}{1 + e^{-(1.38 + 0.72)}} = \frac{1}{1 + 0.122} = .891$ or 89.1%. An item 1 SD harder in one semester has 0.49 times the odds of a correct answer ($\exp(-0.72) = \frac{1}{e^{0.72}} = \frac{1}{2.05} = 0.49$), or $P = \frac{1}{1 + e^{-(1.38 - 0.72)}} = \frac{1}{1 + 0.517} = .659$ or 65.9%.
+
+Students differed in ability by a SD of 0.70 logits. Using the same baseline, a student 1 SD above the mean has 2.01 times the odds of a correct answer ($\exp(0.70) = 2.01$), or $P = \frac{1}{1 + e^{-(1.38 + 0.70)}} = \frac{1}{1 + 0.125} = .889$ or 88.9%. A student 1 SD below the mean has 0.50 times the odds of a correct answer ($\exp(-0.70) = \frac{1}{e^{0.70}} = \frac{1}{2.01} = 0.50$), or $P = \frac{1}{1 + e^{-(1.38 - 0.70)}} = \frac{1}{1 + 0.507} = .664$ or 66.4%.
 
 ## Overall semester differences
 
@@ -191,6 +199,21 @@ icc(d1, by_group = TRUE)
 ```{r}
 model_parameters(d1, effects = "fixed", exponentiate = TRUE)
 ```
+
+Because the model includes an exam × semester interaction, the exam effects compare each exam with Exam 1 in fall only, and the semester effect compares spring with fall on Exam 1 only. Instructors are compared with Marshall, and the model assumes each instructor's difference is the same across exams and semesters. A typical Marshall student on a typical fall Exam 1 item has odds of 18.06 to 1 of answering correctly (*OR* = 18.06, *SE* = 2.61, 95% CI [13.60, 23.98]), a probability of .95. In fall, Exam 2 items had 29% higher odds of a correct answer than Exam 1 items (*OR* = 1.29, *SE* = 0.24, 95% CI [0.90, 1.84], *p* = .165), a probability of .96 for a typical Marshall student, though the interval includes 1. In fall, Exam 3 items had 5% lower odds of a correct answer than Exam 1 items (*OR* = 0.95, *SE* = 0.18, 95% CI [0.65, 1.38], *p* = .786), a probability of .94.
+
+On Exam 1, spring odds were 78% lower than fall odds (*OR* = 0.22, *SE* = 0.03, 95% CI [0.17, 0.29], *p* < .001), a probability of .80. The spring drop on Exam 2 was about the same as on Exam 1 (*OR* = 0.99, *SE* = 0.17, 95% CI [0.70, 1.39], *p* = [from output]). The spring drop on Exam 3 was 29% larger in odds than on Exam 1 (*OR* = 0.71, *SE* = 0.13, 95% CI [0.50, 1.00], *p* = .052), though the interval reaches 1.
+
+Compared to Marshall's students, Baber's students had 1% higher odds of answering correctly (*OR* = 1.01, *SE* = 0.12, 95% CI [0.81, 1.27], *p* = .913; probability .95 on fall Exam 1), Okomeng's students had 3% higher odds (*OR* = 1.03, *SE* = 0.10, 95% CI [0.85, 1.23], *p* = .794; probability .95 on fall Exam 1), Wood's students had 12% higher odds (*OR* = 1.12, *SE* = 0.11, 95% CI [0.93, 1.35], *p* = .230; probability .95 on fall Exam 1), and Wu's students had 16% lower odds (*OR* = 0.84, *SE* = 0.10, 95% CI [0.67, 1.05], *p* = .133; probability .77 on spring Exam 1). Baber taught only in fall and Wu only in spring.
+
+```{r}
+emmeans(d1, ~ semester | exam, type = "response") |>
+  pairs(reverse = TRUE, infer = TRUE)
+```
+
+Post hoc contrasts compared spring with fall within each exam, averaged over instructors. Spring odds were lower on every exam: 78% lower on Exam 1 (*OR* = 0.22, *SE* = 0.03, 95% CI [0.17, 0.29], *p* < .001), 78% lower on Exam 2 (*OR* = 0.22, *SE* = 0.03, 95% CI [0.17, 0.30], *p* < .001), and 84% lower on Exam 3 (*OR* = 0.16, *SE* = 0.02, 95% CI [0.12, 0.21], *p* < .001). For a typical Marshall student, the probability of a correct answer fell from .95 to .80 on Exam 1, from .96 to .84 on Exam 2, and from .94 to .73 on Exam 3.
+
+**No instructor's students differed significantly from Marshall's. In fall, no exam differed significantly from Exam 1. Spring odds were significantly lower than fall odds on all three exams.**
 
 ## Assumption checks
 
